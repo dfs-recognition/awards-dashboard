@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DFS Awards Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { font-family: system-ui; margin: 0; padding: 20px; background: #f8f9fa; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .login { text-align: center; padding: 60px 20px; }
+        .btn { background: #2563eb; color: white; padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; }
+        .dashboard { display: none; }
+        .award-card { background: white; border-radius: 12px; padding: 24px; margin: 20px 0; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .copy-btn { background: #10b981; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; margin-left: 10px; }
+        .user-info { background: #e0f2fe; padding: 16px; border-radius: 8px; margin-bottom: 20px; }
+        .copied { background: #dcfce7 !important; }
+        code { background: #f1f5f9; padding: 8px; border-radius: 4px; font-family: monospace; word-break: break-all; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Login Screen -->
+        <div id="login" class="login">
+            <h1>🏆 DFS Awards Dashboard</h1>
+            <p>Sign in with SSO to view your awards and LinkedIn URLs</p>
+            <button id="sso-btn" class="btn">🔐 Sign in with Microsoft</button>
+            <p style="margin-top: 20px; font-size: 14px; color: #64748b;">Secure SSO authentication required</p>
+        </div>
+        
+        <!-- Protected Dashboard -->
+        <div id="dashboard" class="dashboard">
+            <div class="user-info">
+                <strong id="user-name"></strong> (<span id="user-email"></span>)
+                <button id="logout-btn" class="btn" style="float: right; background: #ef4444; font-size: 14px; padding: 8px 16px;">Logout</button>
+            </div>
+            
+            <h2>Your Awards</h2>
+            <div id="awards-list">Loading...</div>
+            
+            <div style="margin-top: 30px; padding: 20px; background: #f0f9ff; border-radius: 8px;">
+                <h3>📋 Add to LinkedIn:</h3>
+                <ol style="margin: 0; padding-left: 20px;">
+                    <li>Copy <strong>Public URL</strong> above</li>
+                    <li><a href="https://www.linkedin.com/help/linkedin/answer/a567169" target="_blank">Add Licenses & certifications</a></li>
+                    <li>Paste into <strong>Credential URL</strong> field</li>
+                    <li>Save → Share with network! 🎉</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+ 
+    <script>
+        // === REPLACE WITH YOUR SUPABASE CREDENTIALS ===
+       const SUPABASE_URL = 'https://jinxhgnvoowhjkgthfty.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_M08zu-poDIIhTB8zav06Iw_yABz-6pD';
+        
+        const supabase = Supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        
+        // DOM elements
+        const loginDiv = document.getElementById('login');
+        const dashboardDiv = document.getElementById('dashboard');
+        const ssoBtn = document.getElementById('sso-btn');
+        const logoutBtn = document.getElementById('logout-btn');
+        const userNameEl = document.getElementById('user-name');
+        const userEmailEl = document.getElementById('user-email');
+        const awardsList = document.getElementById('awards-list');
+        
+        // SSO Login (Google - change to 'azure' for Microsoft)
+        ssoBtn.onclick = async () => {
+            const { error } = await supabase.auth.signInWithOAuth({
+                provider: 'azure',  // 'azure' for Microsoft Entra ID
+                options: { redirectTo: window.location.origin }
+            });
+            if (error) alert('Login error: ' + error.message);
+        };
+        
+        // Auth state listener
+        supabase.auth.onAuthStateChange(async (event, session) => {
+            if (event === 'SIGNED_IN' || session) {
+                loginDiv.style.display = 'none';
+                dashboardDiv.style.display = 'block';
+                await loadUserData(session);
+            } else {
+                loginDiv.style.display = 'block';
+                dashboardDiv.style.display = 'none';
+            }
+        });
+        
+        logoutBtn.onclick = () => supabase.auth.signOut();
+        
+        // Load user's awards from 'awards' table
+        async function loadUserData(session) {
+            userNameEl.textContent = session.user.user_metadata?.full_name || session.user.email.split('@')[0];
+            userEmailEl.textContent = session.user.email;
+            
+            const { data: awards, error } = await supabase
+                .from('awards')
+                .select('*')
+                .eq('user_email', session.user.email)
+                .order('issue_date', { ascending: false });
+            
+            if (error) {
+                awardsList.innerHTML = `<p style="color: #ef4444;">Error: ${error.message}</p>`;
+                return;
+            }
+            
+            if (awards?.length) {
+                awardsList.innerHTML = awards.map(award => `
+                    <div class="award-card">
+                        <h3>${award.award_name}</h3>
+                        <p><strong>Issue Date:</strong> ${new Date(award.issue_date).toLocaleDateString()}</p>
+                        <p><strong>Award ID:</strong> ${award.award_id}</p>
+                        <div style="margin: 16px 0;">
+                            <strong>✅ Public URL (Copy for LinkedIn):</strong><br>
+                            <code onclick="copyUrl('${window.location.origin}/award/${award.award_id}.html')">
+                                ${window.location.origin}/award/${award.award_id}.html
+                            </code>
+                            <button class="copy-btn" onclick="copyUrl('${window.location.origin}/award/${award.award_id}.html')">📋 Copy</button>
+                        </div>
+                        <small style="color: #64748b;">Generated after secure SSO verification</small>
+                    </div>
+                `).join('');
+            } else {
+                awardsList.innerHTML = `
+                    <div class="award-card" style="text-align: center; color: #64748b;">
+                        <p>No awards yet.</p>
+                    </div>
+                `;
+            }
+        }
+        
+        // Copy to clipboard helper
+        function copyUrl(url) {
+            navigator.clipboard.writeText(url).then(() => {
+                const btn = event.target;
+                btn.textContent = '✅ Copied!';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.textContent = '📋 Copy';
+                    btn.classList.remove('copied');
+                }, 2000);
+            });
+        }
+    </script>
+</body>
+</html>
+        
+        
